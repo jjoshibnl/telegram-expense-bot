@@ -29,11 +29,11 @@ if not os.path.exists(CSV_FILE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome! Send me your expense details (e.g. 'Spent 200 on petrol').\n"
-        "Send /report to download your full expense sheet."
+        "👋 Welcome! Send any expense (e.g., 'Spent 200 on books').\n"
+        "Send /report to download the full CSV file."
     )
 
-# /report command se seedha file milegi
+# 📄 /report command to download CSV directly in chat
 async def send_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, "rb") as f:
@@ -51,22 +51,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     response = None
-    # Agar 503 error aaye to 3 baar try karega
+    last_error = ""
+
+    # Try up to 3 times for temporary busy errors
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=prompt,
             )
             if response:
                 break
         except Exception as e:
-            if "503" in str(e) and attempt < 2:
-                await asyncio.sleep(2)  # 2 second wait karega
+            last_error = str(e)
+            if "503" in last_error and attempt < 2:
+                await asyncio.sleep(2)
                 continue
             else:
-                await update.message.reply_text("Server abhi busy hai. Kripya 5 second baad dubara bhejein.")
-                return
+                break
+
+    if not response:
+        await update.message.reply_text(f"⚠️ Error: {last_error}")
+        return
 
     try:
         parsed_data = [item.strip() for item in response.text.strip().split(",")]
@@ -83,7 +89,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Format samajh nahi aaya. Aise likhein: 'Spent 200 on books'")
     except Exception as e:
-        await update.message.reply_text(f"Error: {str(e)}")
+        await update.message.reply_text(f"Save error: {str(e)}")
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
