@@ -1,12 +1,13 @@
 import os
 import csv
+import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
 
-# Load variables
+# 1. Load keys
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -15,7 +16,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing API credentials.")
 
-# Initialize Gemini Client
+# 2. Setup Gemini Client
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 CSV_FILE = "expenses.csv"
@@ -28,11 +29,11 @@ if not os.path.exists(CSV_FILE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome! Send any expense like 'Spent 200 on food'.\n"
-        "Send /report to download the full expense sheet."
+        "👋 Welcome! Send me your expense details (e.g. 'Spent 200 on petrol').\n"
+        "Send /report to download your full expense sheet."
     )
 
-# 📄 Ye command aapko poori file Telegram par bhejegi
+# /report command se seedha file milegi
 async def send_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, "rb") as f:
@@ -49,11 +50,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Do not include any extra text, headings, or markdown."
     )
     
+    response = None
+    # Agar 503 error aaye to 3 baar try karega
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            if response:
+                break
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                await asyncio.sleep(2)  # 2 second wait karega
+                continue
+            else:
+                await update.message.reply_text("Server abhi busy hai. Kripya 5 second baad dubara bhejein.")
+                return
+
     try:
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=prompt,
-        )
         parsed_data = [item.strip() for item in response.text.strip().split(",")]
         
         if len(parsed_data) >= 3:
@@ -66,7 +81,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             await update.message.reply_text(f"✅ Logged:\nCategory: {category}\nAmount: {amount}\nDetails: {description}")
         else:
-            await update.message.reply_text("Format samajh nahi aaya. Kripya dubara likhein.")
+            await update.message.reply_text("Format samajh nahi aaya. Aise likhein: 'Spent 200 on books'")
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)}")
 
@@ -74,7 +89,7 @@ def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("report", send_report))  # /report command
+    app.add_handler(CommandHandler("report", send_report))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("Bot is running...")
