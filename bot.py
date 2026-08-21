@@ -1,5 +1,6 @@
 import os
 import csv
+import json
 import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
@@ -47,16 +48,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     prompt = (
         f"Extract the expense information from this text: '{user_text}'. "
-        "Return ONLY a comma-separated format like: Category, Amount, Description. "
-        "Do not include any extra text, headings, or markdown."
+        "Return a JSON object with keys: category, amount, and description."
     )
     
     response = None
     last_error = ""
 
-    # Configure thinking budget to 0 to keep responses immediate and clean for text parsing
+    # Force JSON output to guarantee a valid response format
     config = types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_budget=0)
+        response_mime_type="application/json"
     )
 
     # Try up to 3 times for temporary busy errors
@@ -82,21 +82,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        parsed_data = [item.strip() for item in response.text.strip().split(",")]
+        data = json.loads(response.text)
+        category = data.get("category", "General")
+        amount = data.get("amount", "0")
+        description = data.get("description", user_text)
         
-        if len(parsed_data) >= 3:
-            category, amount, description = parsed_data[0], parsed_data[1], ",".join(parsed_data[2:])
-            date_today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        date_today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([date_today, category, amount, description])
             
-            with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([date_today, category, amount, description])
-                
-            await update.message.reply_text(f"✅ Logged:\nCategory: {category}\nAmount: {amount}\nDetails: {description}")
-        else:
-            await update.message.reply_text("Format samajh nahi aaya. Aise likhein: 'Spent 200 on books'")
+        await update.message.reply_text(f"✅ Logged:\nCategory: {category}\nAmount: {amount}\nDetails: {description}")
+        
     except Exception as e:
-        await update.message.reply_text(f"Save error: {str(e)}")
+        await update.message.reply_text("Format samajh nahi aaya. Aise likhein: 'Spent 200 on books'")
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
