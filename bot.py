@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
 
-# 1. Load keys
+# 1. Load keys from .env
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -28,13 +28,14 @@ if not os.path.exists(CSV_FILE):
         writer = csv.writer(f)
         writer.writerow(["Date", "Category", "Amount", "Description"])
 
+# 3. Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome! Send any expense (e.g., 'Spent 200 on books').\n"
         "Send /report to download the full CSV file."
     )
 
-# 📄 /report command to download CSV directly in chat
+# 4. /report command to download CSV directly in chat
 async def send_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, "rb") as f:
@@ -42,6 +43,7 @@ async def send_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Abhi tak koi expense save nahi hua.")
 
+# 5. Message handler for expenses
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     
@@ -58,9 +60,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Try up to 3 times for temporary busy errors
     for attempt in range(3):
         try:
-            # Using the modern model supported by your key
+            # Using the exact model required by your API key
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=prompt,
             )
             if response and response.text:
@@ -108,6 +110,8 @@ def main():
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("report", send_report))
+    
+    # Filter out commands so text like 'report' without a slash doesn't get logged as an expense
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("Bot is running...")
