@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
+from google.genai import types
 
 # 1. Load keys
 load_dotenv()
@@ -53,12 +54,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = None
     last_error = ""
 
+    # Configure thinking budget to 0 to keep responses immediate and clean for text parsing
+    config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_budget=0)
+    )
+
     # Try up to 3 times for temporary busy errors
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",  # Updated to a valid model identifier
+                model="gemini-3.6-flash",
                 contents=prompt,
+                config=config,
             )
             if response:
                 break
