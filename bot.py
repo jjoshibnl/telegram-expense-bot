@@ -6,7 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-import google.generativeai as genai
+from google import genai
 
 # 1. Load keys
 load_dotenv()
@@ -17,10 +17,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing API credentials.")
 
-# 2. Setup Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-# Using the stable Gemini model name
-model = genai.GenerativeModel("gemini-1.5-flash")
+# 2. Setup Gemini Client using the modern SDK
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 CSV_FILE = "expenses.csv"
 
@@ -47,11 +45,11 @@ async def send_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     
+    # Prompt instructing Gemini to return a clean JSON string
     prompt = (
-        f"Extract the expense information from this text: '{user_text}'. "
-        "Return a valid JSON object with EXACTLY three keys: "
-        '"category" (string), "amount" (number or string), and "description" (string). '
-        "Return ONLY the raw JSON object, no markdown blocks."
+        f"Extract expense info from this text: '{user_text}'. "
+        "You must return ONLY a raw JSON object with these exact keys: "
+        '"category", "amount", "description". Do not use markdown code blocks or any other text.'
     )
     
     response = None
@@ -60,10 +58,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Try up to 3 times for temporary busy errors
     for attempt in range(3):
         try:
-            # Request JSON output configuration
-            response = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
+            # Using the modern model supported by your key
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
             )
             if response and response.text:
                 break
@@ -80,10 +78,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # Clean up response text in case markdown code blocks were returned
+        # Clean up response text in case markdown blocks were included
         clean_text = response.text.strip()
         if clean_text.startswith("```json"):
             clean_text = clean_text[7:]
+        if clean_text.startswith("```"):
+            clean_text = clean_text[3:]
         if clean_text.endswith("```"):
             clean_text = clean_text[:-3]
             
