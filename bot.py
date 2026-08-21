@@ -6,8 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 # 1. Load keys
 load_dotenv()
@@ -18,8 +17,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing API credentials.")
 
-# 2. Setup Gemini Client
-client = genai.Client(api_key=GEMINI_API_KEY)
+# 2. Setup Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+# Using the stable Gemini model name
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 CSV_FILE = "expenses.csv"
 
@@ -48,26 +49,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     prompt = (
         f"Extract the expense information from this text: '{user_text}'. "
-        "Return a JSON object with keys: category, amount, and description."
+        "Return a valid JSON object with EXACTLY three keys: "
+        '"category" (string), "amount" (number or string), and "description" (string). '
+        "Return ONLY the raw JSON object, no markdown blocks."
     )
     
     response = None
     last_error = ""
 
-    # Force JSON output to guarantee a valid response format
-    config = types.GenerateContentConfig(
-        response_mime_type="application/json"
-    )
-
     # Try up to 3 times for temporary busy errors
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=prompt,
-                config=config,
+            # Request JSON output configuration
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
             )
-            if response:
+            if response and response.text:
                 break
         except Exception as e:
             last_error = str(e)
@@ -77,12 +75,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 break
 
-    if not response:
+    if not response or not response.text:
         await update.message.reply_text(f"⚠️ Error: {last_error}")
         return
 
     try:
-        data = json.loads(response.text)
+        # Clean up response text in case markdown code blocks were returned
+        clean_text = response.text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+            
+        data = json.loads(clean_text.strip())
         category = data.get("category", "General")
         amount = data.get("amount", "0")
         description = data.get("description", user_text)
